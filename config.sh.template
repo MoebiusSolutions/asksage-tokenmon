@@ -1,0 +1,7 @@
+
+# Specify your appropriate command for building/running containers
+#CONTAINER_COMMAND="sudo docker"
+#CONTAINER_COMMAND="docker"
+#CONTAINER_COMMAND="podman"
+#CONTAINER_COMMAND="sudo docker"
+
