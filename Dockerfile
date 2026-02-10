@@ -8,6 +8,8 @@ FROM python:3.14-slim
 RUN pip install --no-cache-dir \
     # Used to interact with REST endpoints
     requests \
+    # Used for testing
+    pytest \
     # AskSage API and dependencies
     asksageclient pip_system_certs
 

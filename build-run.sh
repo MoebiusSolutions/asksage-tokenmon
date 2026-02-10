@@ -6,11 +6,9 @@ set -e -o pipefail -u
 SCRIPT_FILE="$(basename "$0")"
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
-cd "$SCRIPT_DIR"
+/bin/bash "${SCRIPT_DIR}/build.sh"
 
 . config.sh
-
-$CONTAINER_COMMAND build -t asksage-tokenmon:local-build .
 
 # TODO: Remove old
 # Read each file parameter, resolving to the fully qualified path
@@ -26,17 +24,19 @@ $CONTAINER_COMMAND build -t asksage-tokenmon:local-build .
 #     echo "[]" > "$HISTORY_FILE"
 # fi
 
-HISTORY_DIR="${SCRIPT_DIR}/history"
-# Create empty history dir doesn't exist yet (preventing root-protected when docker does it).
-if [[ ! -d "$HISTORY_DIR" ]]; then
-    mkdir -p "$HISTORY_DIR"
+HISTORY_FILE="${SCRIPT_DIR}/history.sqlite3"
+# Create empty history file doesn't exist yet (preventing root-protected when docker does it).
+if [[ ! -f "$HISTORY_FILE" ]]; then
+    mkdir -p "$( dirname "$HISTORY_FILE" )"
+    touch "$HISTORY_FILE"
 fi
 
 $CONTAINER_COMMAND run -it --rm \
     --security-opt label=disable \
     -v "${SCRIPT_DIR}/.asksage-auth.json:/.asksage-auth.json:ro" \
-    -v "${HISTORY_DIR}:/history:rw" \
+    -v "${HISTORY_FILE}:/history.sqlite3:rw" \
     asksage-tokenmon:local-build \
         --auth-file /.asksage-auth.json \
-        --history-dir /history
+        --history-file /history.sqlite3 \
+        "$@"
 
