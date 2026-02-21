@@ -1,5 +1,5 @@
 from contextlib import redirect_stdout
-from main import db_init, write_record_to_history, get_period_deltas, print_period_deltas
+from main import db_init, write_record_to_history, get_period_deltas, render_period_deltas
 from pathlib import Path
 import io
 import pytest
@@ -63,7 +63,7 @@ def db_conn(tmp_path: Path):
 #
 #     assert rows == []
 #
-# def test__print_period_deltas__contiguous():
+# def test__render_period_deltas__contiguous():
 #     rows = [
 #         (100, 0),
 #         (110, 10),
@@ -75,7 +75,7 @@ def db_conn(tmp_path: Path):
 #
 #     f = io.StringIO()
 #     with redirect_stdout(f):
-#         print_period_deltas(rows, now_epoc, period_secs, period_count)
+#         render_period_deltas(rows, now_epoc, period_secs, period_count, 1, "secs")
 #
 #     output = f.getvalue().strip().splitlines()
 #     expected = [
@@ -85,7 +85,7 @@ def db_conn(tmp_path: Path):
 #     ]
 #     assert output == expected
 #
-# def test__print_period_deltas__with_gaps():
+# def test__render_period_deltas__with_gaps():
 #     rows = [
 #         (100, 0),
 #         (120, 20),  # 110 missing
@@ -96,7 +96,7 @@ def db_conn(tmp_path: Path):
 #
 #     f = io.StringIO()
 #     with redirect_stdout(f):
-#         print_period_deltas(rows, now_epoc, period_secs, period_count)
+#         render_period_deltas(rows, now_epoc, period_secs, period_count, 1, "secs")
 #
 #     output = f.getvalue().strip().splitlines()
 #     expected = [
@@ -106,7 +106,7 @@ def db_conn(tmp_path: Path):
 #     ]
 #     assert output == expected
 #
-# def test__print_period_deltas__first_bucket_missing():
+# def test__render_period_deltas__first_bucket_missing():
 #     rows = [
 #         (110, 5),
 #         (120, 15),
@@ -117,7 +117,7 @@ def db_conn(tmp_path: Path):
 #
 #     f = io.StringIO()
 #     with redirect_stdout(f):
-#         print_period_deltas(rows, now_epoc, period_secs, period_count)
+#         render_period_deltas(rows, now_epoc, period_secs, period_count, 1, "secs")
 #
 #     output = f.getvalue().strip().splitlines()
 #     expected = [
@@ -187,61 +187,52 @@ def test__get_period_deltas__no_data(db_conn):
         (1_000_000_000, 0, True),
     ]
 
-def test__print_period_deltas__contiguous():
+def test__render_period_deltas__contiguous():
     rows = [
         (100, 0, False),
         (110, 10, False),
         (120, 20, False),
     ]
 
-    f = io.StringIO()
-    with redirect_stdout(f):
-        print_period_deltas(rows, None, None, None)
+    output = render_period_deltas(rows, 133, 10, 10, 1, "secs")
 
-    output = f.getvalue().strip().splitlines()
-    assert output == [
-        "100, 0",
-        "110, 10",
-        "120, 20",
+    assert output.strip().splitlines() == [
+        "[+ 10 secs] 20",
+        "[+ 20 secs] 10",
+        "[+ 30 secs] 0",
     ]
 
-def test__print_period_deltas__with_gaps():
+def test__render_period_deltas__with_gaps():
     rows = [
         (100, 0, False),
         (110, 0, True),
         (120, 20, False),
     ]
 
-    f = io.StringIO()
-    with redirect_stdout(f):
-        print_period_deltas(rows, None, None, None)
+    output = render_period_deltas(rows, 133, 10, 10, 1, "secs")
 
-    output = f.getvalue().strip().splitlines()
-    assert output == [
-        "100, 0",
-        "110, no data",
-        "120, 20",
+    assert output.strip().splitlines() == [
+        "[+ 10 secs] 20",
+        "[+ 20 secs] (no data)",
+        "[+ 30 secs] 0",
     ]
 
-def test__print_period_deltas__first_bucket_missing():
+def test__render_period_deltas__first_bucket_missing():
     rows = [
         (100, 0, True),
-        (110, 5, False),
-        (120, 15, False),
+        (110, 10, False),
+        (120, 20, False),
     ]
 
-    f = io.StringIO()
-    with redirect_stdout(f):
-        print_period_deltas(rows, None, None, None)
+    output = render_period_deltas(rows, 133, 10, 10, 1, "secs")
 
-    output = f.getvalue().strip().splitlines()
-    assert output == [
-        "100, no data",
-        "110, 5",
-        "120, 15",
+    assert output.strip().splitlines() == [
+        "[+ 10 secs] 20",
+        "[+ 20 secs] 10",
+        "[+ 30 secs] (no data)",
     ]
 
-def test__get_and_print_period_deltas__integration(db_conn):
+def test__get_and_render_period_deltas__integration(db_conn):
     now = 1_000_000_090
     period_secs = 10
     period_count = 7  # buckets: 30 → 90
@@ -260,19 +251,15 @@ def test__get_and_print_period_deltas__integration(db_conn):
         period_count=period_count,
     )
 
-    f = io.StringIO()
-    with redirect_stdout(f):
-        print_period_deltas(rows, now, period_secs, period_count)
+    output = render_period_deltas(rows, now, period_secs, period_count, 1, "secs")
 
-    output = f.getvalue().strip().splitlines()
-
-    assert output == [
-        "1000000030, 0",        # first observed bucket
-        "1000000040, 20",       # rolled inside bucket
-        "1000000050, no data",
-        "1000000060, 30",
-        "1000000070, no data",
-        "1000000080, 60",
-        "1000000090, no data",
+    assert output.strip().splitlines() == [
+        "[+  0 secs] (no data)",
+        "[+ 10 secs] 60",
+        "[+ 20 secs] (no data)",
+        "[+ 30 secs] 30",
+        "[+ 40 secs] (no data)",
+        "[+ 50 secs] 20", # rolled inside bucket
+        "[+ 60 secs] 0", # first observed bucket
     ]
 

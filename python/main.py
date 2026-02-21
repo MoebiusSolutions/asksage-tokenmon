@@ -1,11 +1,13 @@
 from asksageclient import AskSageClient
+from pathlib import Path
 import argparse
+import curses
 import json
 import os
 import random
-import time
 import sqlite3
-from pathlib import Path
+import sys
+import time
 
 SECONDS_IN_31_DAYS = 31 * 24 * 60 * 60
 
@@ -117,15 +119,79 @@ def get_period_deltas(
 
     return results
 
-def print_period_deltas(rows, now_epoc, period_secs, period_count):
+def format_duration(seconds):
+    units = [
+        ("d", 86400),
+        ("h", 3600),
+        ("m", 60),
+        ("s", 1),
+    ]
+
+    parts = []
+
+    for name, unit_seconds in units:
+        value, seconds = divmod(seconds, unit_seconds)
+        if value:
+            # Use or remove
+            # plural = "s" if value != 1 else ""
+            # parts.append(f"{value} {name}{plural}")
+            parts.append(f"{value}{name}")
+
+    return " ".join(parts) or "0 secs"
+
+def format_duration(period_secs, sec_per_unit, unit_name):
+    value = period_secs // sec_per_unit
+    return f"{value} {unit_name}"
+
+def render_period_deltas(rows, now_epoc, period_secs, period_count, period_unit_secs, period_unit_name):
     """
     rows = list of (bucket_ts, delta, no_data)
     """
-    for bucket_ts, delta, no_data in rows:
+    result = ""
+    for idx, (bucket_ts, delta, no_data) in enumerate(reversed(rows)):
+        now_bucket = (now_epoc // period_secs) * period_secs
+        bucket_age = now_bucket - bucket_ts
+        bucket_age_string = format_duration(bucket_age, period_unit_secs, period_unit_name)
+        bucket_age_string = bucket_age_string.rjust(8)
         if no_data:
-            print(f"{bucket_ts}, no data")
+            result += f"[+{bucket_age_string}] (no data)\n"
         else:
-            print(f"{bucket_ts}, {delta}")
+            result += f"[+{bucket_age_string}] {delta}\n"
+
+    return result
+
+def print_block_to_curses(stdscr, text, start_y=0, start_x=0):
+    """
+    Safely prints a multi-line string to a curses window.
+    
+    Args:
+        stdscr: curses window
+        text: a single string, possibly containing newlines
+        start_y: row to start printing at
+        start_x: column to start printing at
+        
+    Returns:
+        int: number of lines actually printed
+    """
+    h, w = stdscr.getmaxyx()
+    printed = 0
+
+    # Split the text into lines
+    lines = text.splitlines()
+
+    for i, line in enumerate(lines):
+        y = start_y + i
+        if y >= h:  # stop if we run out of vertical space
+            break
+        try:
+            stdscr.addstr(y, start_x, line[:w - start_x - 1])  # clip horizontally
+            printed += 1
+        except curses.error:
+            pass  # ignore if writing outside bounds
+
+    stdscr.refresh()
+    return printed
+
 
 # TODO: Remove or fix
 # def generate_sample_data(db_connection):
@@ -168,7 +234,7 @@ def print_period_deltas(rows, now_epoc, period_secs, period_count):
 #
 #     db_connection.commit()
 
-def main():
+def main(stdscr):
 
     parser = argparse.ArgumentParser(description="Tracks AskSage token usage")
     parser.add_argument("--history-file", required=True, help="Path to the sqlite3 database to populate with history data.")
@@ -181,10 +247,22 @@ def main():
     history_file = args.history_file
     db_connection = db_init(history_file)
 
+    curses.curs_set(0)
+
     if args.gen_sample_data:
         print("Writing sample data to database file")
         generate_sample_data(db_connection)
         return
+
+        # TODO: Where did this come from? Bad paste?
+        if no_data:
+            stdscr.addstr(idx+1, 0, f"[+{bucket_age_string}] (no data)")
+        else:
+            stdscr.addstr(idx+1, 0, f"[+{bucket_age_string}] {delta}")
+
+    stdscr.clear()
+    stdscr.addstr(1, 0, f"Reading first data point...")
+    stdscr.refresh()
 
     while True: 
         email, api_key = read_auth_file(args.auth_file)
@@ -199,12 +277,25 @@ def main():
         now_epoc = int(time.time())
         write_record_to_history(db_connection, now_epoc, monthly_inference_tokens_used, monthly_training_tokens_used)
 
-        deltas = get_period_deltas(db_connection, now_epoc, 10, 12)
-        print_period_deltas(deltas, now_epoc, 10, 12)
+        out_text = ""
+        deltas = get_period_deltas(db_connection, now_epoc, 10, 6)
+        out_text += render_period_deltas(deltas, now_epoc, 10, 6, 1, "secs")
+        out_text += "---------\n"
+        deltas = get_period_deltas(db_connection, now_epoc, 600, 6)
+        out_text += render_period_deltas(deltas, now_epoc, 600, 6, 60, "mins")
+        out_text += "---------\n"
+        deltas = get_period_deltas(db_connection, now_epoc, 3600, 6)
+        out_text += render_period_deltas(deltas, now_epoc, 3600, 6, 3600, "hours")
+        out_text += "---------\n"
+        deltas = get_period_deltas(db_connection, now_epoc, 86400, 7)
+        out_text += render_period_deltas(deltas, now_epoc, 86400, 7, 86400, "days")
+        stdscr.clear()
+        print_block_to_curses(stdscr, out_text)
+        stdscr.refresh()
 
         # Sleep slightly less than 10 seconds (our smallest bucket)
         time.sleep(7)
 
 if __name__ == "__main__":
-    main()
+    curses.wrapper(main)
 

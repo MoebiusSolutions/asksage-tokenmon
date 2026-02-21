@@ -13,5 +13,6 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 $CONTAINER_COMMAND run -it --rm \
     --entrypoint python \
     asksage-tokenmon:local-build \
-    -m pytest
+    -m pytest \
+    "$@"
 
